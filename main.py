@@ -7,6 +7,8 @@ import time
 import torch
 import torch.backends.cudnn as cudnn
 import json
+import logging
+import sys
 
 from pathlib import Path
 
@@ -22,6 +24,7 @@ from engine import train_one_epoch, evaluate
 from samplers import RASampler
 import models
 import utils
+from vit_with_patch_reduce import patch_reduce_base_patch16_224
 
 
 def get_args_parser():
@@ -44,6 +47,7 @@ def get_args_parser():
     parser.set_defaults(model_ema=True)
     parser.add_argument('--model-ema-decay', type=float, default=0.99996, help='')
     parser.add_argument('--model-ema-force-cpu', action='store_true', default=False, help='')
+    parser.add_argument('--reduction-map', default='4:0.75,5:0.75,6:0.75,7:0.75,8:0.75,9:0.75,10:0.75,11:0.75', type=str)
 
     # Optimizer parameters
     parser.add_argument('--opt', default='adamw', type=str, metavar='OPTIMIZER',
@@ -124,7 +128,7 @@ def get_args_parser():
                         help='How to apply mixup/cutmix params. Per "batch", "pair", or "elem"')
 
     # Dataset parameters
-    parser.add_argument('--data-path', default='/datasets01/imagenet_full_size/061417/', type=str,
+    parser.add_argument('--data-path', default='/home/tz21/data/imagenet/', type=str,
                         help='dataset path')
     parser.add_argument('--data-set', default='IMNET', choices=['CIFAR', 'IMNET', 'INAT', 'INAT19'],
                         type=str, help='Image Net dataset path')
@@ -156,7 +160,36 @@ def get_args_parser():
     return parser
 
 
+class StreamToLogger(object):
+    """
+    Fake file-like stream object that redirects writes to a logger instance.
+    """
+    def __init__(self, logger, level):
+       self.logger = logger
+       self.level = level
+       self.linebuf = ''
+
+    def write(self, buf):
+       for line in buf.rstrip().splitlines():
+          self.logger.log(self.level, line.rstrip())
+
+    def flush(self):
+        pass
+
+
 def main(args):
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(f"out/{args.model}.log"),
+            logging.StreamHandler(),
+        ],
+    )
+    log = logging.getLogger('deit')
+    sys.stdout = StreamToLogger(log,logging.INFO)
+    sys.stderr = StreamToLogger(log,logging.ERROR)
+
     utils.init_distributed_mode(args)
 
     print(args)
@@ -223,14 +256,24 @@ def main(args):
             label_smoothing=args.smoothing, num_classes=args.nb_classes)
 
     print(f"Creating model: {args.model}")
-    model = create_model(
-        args.model,
-        pretrained=False,
-        num_classes=args.nb_classes,
-        drop_rate=args.drop,
-        drop_path_rate=args.drop_path,
-        drop_block_rate=None,
-    )
+    if args.model.startswith('patch_reduce'):
+        reduction_map = eval('{%s}' % args.reduction_map)
+        model = patch_reduce_base_patch16_224(
+            args.model,
+            num_classes=args.nb_classes,
+            drop_rate=args.drop,
+            drop_path_rate=args.drop_path,
+            reduction_map=reduction_map,
+        )
+    else:
+        model = create_model(
+            args.model,
+            pretrained=False,
+            num_classes=args.nb_classes,
+            drop_rate=args.drop,
+            drop_path_rate=args.drop_path,
+            drop_block_rate=None,
+        )
 
     # TODO: finetuning
 
