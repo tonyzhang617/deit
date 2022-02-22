@@ -24,6 +24,8 @@ from engine import train_one_epoch, evaluate
 from samplers import RASampler
 import models
 import utils
+from fvcore.nn import FlopCountAnalysis, flop_count_table
+from torchinfo import summary
 from vit_with_patch_reduce import patch_reduce_base_patch16_224
 
 
@@ -278,6 +280,12 @@ def main(args):
     # TODO: finetuning
 
     model.to(device)
+
+    summary(model, (args.batch_size, 3, 224, 224), device=device, depth=10)
+
+    rand_input = (torch.randn((args.batch_size, 3, 224, 224)).to(device), )
+    flops = FlopCountAnalysis(model, rand_input)
+    print(flop_count_table(flops))
 
     model_ema = None
     if args.model_ema:

@@ -70,14 +70,18 @@ class Attention(nn.Module):
 
 
 class PatchReduce(nn.Module):
-    def __init__(self, patch_dim, out_patches, bias=False) -> None:
+    def __init__(self, patch_dim, out_patches, bias=False, survival_prob=1.) -> None:
         super().__init__()
         self.linear = nn.Linear(patch_dim, out_patches, bias=bias)
+        self.survival_prob = torch.Tensor([survival_prob])
 
     def forward(self, patches):
-        alphas = rearrange(self.linear(patches), 'b n h -> b h n')
-        alphas = F.softmax(alphas, dim=2)
-        return torch.matmul(alphas, patches)
+        if not self.training or torch.bernoulli(self.survival_prob).item() > 0.:
+            alphas = rearrange(self.linear(patches), 'b n h -> b h n')
+            alphas = F.softmax(alphas, dim=2)
+            return torch.matmul(alphas, patches)
+        else:
+            return patches
 
 
 class Block(nn.Module):
@@ -92,7 +96,7 @@ class Block(nn.Module):
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
-        self.patch_reduce = PatchReduce(dim, out_patches) if out_patches is not None else nn.Identity()
+        self.patch_reduce = PatchReduce(dim, out_patches, survival_prob=0.9) if out_patches is not None else nn.Identity()
 
     def forward(self, x):
         x = x + self.drop_path(self.attn(self.norm1(x)))
@@ -386,11 +390,13 @@ def patch_reduce_base_patch16_224(pretrained=False, **kwargs):
 
 if __name__ == '__main__':
     from torchinfo import summary
+    device = torch.device('cuda')
     model = patch_reduce_base_patch16_224(
         pretrained=False,
         num_classes=1000,
         drop_rate=0.0,
         drop_path_rate=0.1,
         reduction_map={4:0.75,5:0.75,6:0.75,7:0.75,8:0.75,9:0.75,10:0.75,11:0.75},
-    )
+    ).to(device)
     summary(model, (1, 3, 224, 224), depth=10)
+    # print(model(torch.randn(1, 3, 224, 224).to(device)).shape)
