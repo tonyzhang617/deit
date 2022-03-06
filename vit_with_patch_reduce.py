@@ -37,6 +37,7 @@ from einops import rearrange
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD, IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD
 from timm.models.helpers import build_model_with_cfg, named_apply, adapt_input_conv
 from timm.models.layers import PatchEmbed, Mlp, DropPath, trunc_normal_, lecun_normal_
+from timm.models.vision_transformer import deit_tiny_patch16_224
 # from timm.models.registry import register_model
 
 _logger = logging.getLogger(__name__)
@@ -96,7 +97,7 @@ class Block(nn.Module):
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
-        self.patch_reduce = PatchReduce(dim, out_patches, survival_prob=0.9) if out_patches is not None else nn.Identity()
+        self.patch_reduce = PatchReduce(dim, out_patches, survival_prob=1.) if out_patches is not None else nn.Identity()
 
     def forward(self, x):
         x = x + self.drop_path(self.attn(self.norm1(x)))
@@ -377,6 +378,24 @@ def checkpoint_filter_fn(state_dict, model):
     return out_dict
 
 
+def patch_reduce_tiny_patch16_224(pretrained=False, **kwargs):
+    """ DeiT-tiny model @ 224x224 from paper (https://arxiv.org/abs/2012.12877).
+    ImageNet-1k weights from https://github.com/facebookresearch/deit.
+    """
+    # model_kwargs = dict(patch_size=16, embed_dim=192, depth=12, num_heads=3, **kwargs)
+    # model = _create_vision_transformer('deit_tiny_patch16_224', pretrained=pretrained, **model_kwargs)
+    model = VisionTransformer(patch_size=16, embed_dim=192, depth=12, num_heads=3, **kwargs)
+    return model
+
+
+def patch_reduce_deep_tiny_patch16_224(pretrained=False, **kwargs):
+    """ DeiT-tiny model @ 224x224 from paper (https://arxiv.org/abs/2012.12877).
+    ImageNet-1k weights from https://github.com/facebookresearch/deit.
+    """
+    model = VisionTransformer(patch_size=16, embed_dim=192, depth=20, num_heads=3, **kwargs)
+    return model
+
+
 def patch_reduce_base_patch16_224(pretrained=False, **kwargs):
     """ DeiT base model @ 224x224 from paper (https://arxiv.org/abs/2012.12877).
     ImageNet-1k weights from https://github.com/facebookresearch/deit.
@@ -391,12 +410,29 @@ def patch_reduce_base_patch16_224(pretrained=False, **kwargs):
 if __name__ == '__main__':
     from torchinfo import summary
     device = torch.device('cuda')
-    model = patch_reduce_base_patch16_224(
+    model = patch_reduce_deep_tiny_patch16_224(
         pretrained=False,
         num_classes=1000,
         drop_rate=0.0,
         drop_path_rate=0.1,
-        reduction_map={4:0.75,5:0.75,6:0.75,7:0.75,8:0.75,9:0.75,10:0.75,11:0.75},
+        reduction_map={8:0.75,9:0.75,10:0.75,11:0.75,12:0.75,13:0.75,14:0.75,15:0.75,16:0.75,17:0.75,18:0.75,19:0.75},
     ).to(device)
-    summary(model, (1, 3, 224, 224), depth=10)
-    # print(model(torch.randn(1, 3, 224, 224).to(device)).shape)
+    summary(model, (256, 3, 224, 224), depth=10)
+
+    from fvcore.nn import FlopCountAnalysis, flop_count_table
+    rand_input = (torch.randn((256, 3, 224, 224)).to(device), )
+    flops = FlopCountAnalysis(model, rand_input)
+    print(flop_count_table(flops))
+
+    model = deit_tiny_patch16_224(
+        pretrained=False,
+        num_classes=1000,
+        drop_rate=0.0,
+        drop_path_rate=0.1,
+    ).to(device)
+    summary(model, (256, 3, 224, 224), depth=10)
+
+    from fvcore.nn import FlopCountAnalysis, flop_count_table
+    rand_input = (torch.randn((256, 3, 224, 224)).to(device), )
+    flops = FlopCountAnalysis(model, rand_input)
+    print(flop_count_table(flops))

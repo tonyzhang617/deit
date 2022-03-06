@@ -26,7 +26,7 @@ import models
 import utils
 from fvcore.nn import FlopCountAnalysis, flop_count_table
 from torchinfo import summary
-from vit_with_patch_reduce import patch_reduce_base_patch16_224
+from vit_with_patch_reduce import patch_reduce_base_patch16_224, patch_reduce_deep_tiny_patch16_224, patch_reduce_tiny_patch16_224
 
 
 def get_args_parser():
@@ -130,7 +130,7 @@ def get_args_parser():
                         help='How to apply mixup/cutmix params. Per "batch", "pair", or "elem"')
 
     # Dataset parameters
-    parser.add_argument('--data-path', default='/home/tz21/data/imagenet/', type=str,
+    parser.add_argument('--data-path', default='/scratch0/sd73/imagenet/', type=str,
                         help='dataset path')
     parser.add_argument('--data-set', default='IMNET', choices=['CIFAR', 'IMNET', 'INAT', 'INAT19'],
                         type=str, help='Image Net dataset path')
@@ -258,9 +258,27 @@ def main(args):
             label_smoothing=args.smoothing, num_classes=args.nb_classes)
 
     print(f"Creating model: {args.model}")
-    if args.model.startswith('patch_reduce'):
+    if args.model.startswith('patch_reduce_base'):
         reduction_map = eval('{%s}' % args.reduction_map)
         model = patch_reduce_base_patch16_224(
+            args.model,
+            num_classes=args.nb_classes,
+            drop_rate=args.drop,
+            drop_path_rate=args.drop_path,
+            reduction_map=reduction_map,
+        )
+    elif args.model.startswith('patch_reduce_tiny'):
+        reduction_map = eval('{%s}' % args.reduction_map)
+        model = patch_reduce_tiny_patch16_224(
+            args.model,
+            num_classes=args.nb_classes,
+            drop_rate=args.drop,
+            drop_path_rate=args.drop_path,
+            reduction_map=reduction_map,
+        )
+    elif args.model.startswith('patch_reduce_deep_tiny'):
+        reduction_map = eval('{%s}' % args.reduction_map)
+        model = patch_reduce_deep_tiny_patch16_224(
             args.model,
             num_classes=args.nb_classes,
             drop_rate=args.drop,
@@ -298,7 +316,7 @@ def main(args):
 
     model_without_ddp = model
     if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
         model_without_ddp = model.module
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)
